@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leaflet.js + OpenStreetMap 即時地圖與資料點呈現</title>
+    <!-- 1. 引入 Leaflet CSS 樣式 -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            background-color: #f8f9fa;
+        }
+        /* 側邊欄設計 */
+        sidebar {
+            width: 380px;
+            background: #ffffff;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+        }
+        .sidebar-header {
+            padding: 20px;
+            background: #2b7a78;
+            color: white;
+        }
+        .sidebar-header h2 {
+            font-size: 1.3rem;
+            margin-bottom: 5px;
+        }
+        .sidebar-header p {
+            font-size: 0.85rem;
+            opacity: 0.9;
+        }
+        .controls {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            background: #fdfdfd;
+        }
+        .search-input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            margin-bottom: 10px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .search-input:focus {
+            border-color: #2b7a78;
+        }
+        .tab-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .tab-btn {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #2b7a78;
+            background: white;
+            color: #2b7a78;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .tab-btn.active {
+            background: #2b7a78;
+            color: white;
+        }
+        /* 站點清單容器 */
+        .station-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .station-card {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 12px 15px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.2s;
+        }
+        .station-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.08);
+            border-color: #2b7a78;
+        }
+        .station-title {
+            font-weight: bold;
+            font-size: 1rem;
+            color: #333;
+            margin-bottom: 4px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .station-address {
+            font-size: 0.8rem;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        .station-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            background: #f4f6f7;
+            padding: 6px 10px;
+            border-radius: 4px;
+        }
+        .badge-bikes { color: #27ae60; font-weight: bold; }
+        .badge-empty { color: #e67e22; font-weight: bold; }
+        
+        /* 地圖主體區域 */
+        #map {
+            flex: 1;
+            height: 100%;
+        }
+        
+        /* 彈窗 Popup 客製化樣式 */
+        .leaflet-popup-content-wrapper {
+            border-radius: 8px;
+        }
+        .popup-box h3 {
+            font-size: 1.1rem;
+            color: #2b7a78;
+            margin-bottom: 5px;
+        }
+        .popup-box p {
+            font-size: 0.9rem;
+            color: #444;
+            margin-bottom: 6px;
+        }
+        .fav-btn {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            width: 100%;
+            margin-top: 5px;
+            transition: background 0.2s;
+        }
+        .fav-btn.is-fav {
+            background: #27ae60;
+        }
+        .loading-overlay {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.75);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            z-index: 1500;
+            display: none;
+        }
+        
+        /* 響應式手機版適應 */
+        @media (max-width: 768px) {
+            body {
+                flex-direction: column-reverse;
+            }
+            sidebar {
+                width: 100%;
+                height: 45vh;
+            }
+            #map {
+                height: 55vh;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 側邊欄介面：包含搜尋與清單 -->
+    <sidebar>
+        <div class="sidebar-header">
+            <h2>🚴 即時資料地圖呈現</h2>
+            <p>串接政府開源經緯度資料與 Leaflet.js</p>
+        </div>
+        <div class="controls">
+            <input type="text" id="searchInput" class="search-input" placeholder="🔍 輸入站名或區域搜尋...">
+            <div class="tab-buttons">
+                <button class="tab-btn active" id="allTab" onclick="switchTab('all')">全部站點</button>
+                <button class="tab-btn" id="favTab" onclick="switchTab('fav')">我的最愛 (<span id="favCount">0</span>)</button>
+            </div>
+        </div>
+        <div class="station-list" id="stationList">
+            <!-- 動態載入站點卡片 -->
+        </div>
+    </sidebar>
+
+    <!-- 地圖呈現容器 -->
+    <div id="map"></div>
+    <div class="loading-overlay" id="loadingOverlay">即時資料載入中...</div>
+
+    <!-- 2. 引入 Leaflet JS 核心庫 -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script>
+        // 範例串接政府開放資料：YouBike 2.0 即時資料集 (含經緯度欄位 lat, lng)
+        const API_URL = 'https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json';
+
+        let map;
+        let markersLayer = L.layerGroup();
+        let allStations = [];
+        let currentTab = 'all'; 
+        
+        // 使用 LocalStorage 讀取先前儲存的最愛清單
+        let favorites = JSON.parse(localStorage.getItem('map_favorites')) || [];
+
+        // 需求 1：設定合理的初始中心點與縮放層級
+        function initMap() {
+            // 以台北車站為初始中心點 [25.0478, 121.517]，縮放層級設為 14
+            map = L.map('map').setView([25.0478, 121.517], 14);
+
+            // 載入 OpenStreetMap 圖層
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 貢獻者'
+            }).addTo(map);
+
+            markersLayer.addTo(map);
+        }
+
+        // 需求 2：串接含經緯度欄位的開放資料 API
+        async function fetchStations() {
+            showLoading(true);
+            try {
+                const response = await fetch(API_URL);
+                const data = await response.json();
+                allStations = data;
+                renderStations();
+                updateMarkers(); // 產生地圖 Marker
+            } catch (error) {
+                console.error('取得開放資料失敗:', error);
+                alert('即時資料載入失敗，請確認網路連線。');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function showLoading(show) {
+            document.getElementById('loadingOverlay').style.display = show ? 'block' : 'none';
+        }
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.getElementById('allTab').classList.toggle('active', tab === 'all');
+            document.getElementById('favTab').classList.toggle('active', tab === 'fav');
+            renderStations();
+            updateMarkers();
+        }
+
+        // 渲染側邊欄清單
+        function renderStations() {
+            const listContainer = document.getElementById('stationList');
+            const keyword = document.getElementById('searchInput').value.trim().toLowerCase();
+            listContainer.innerHTML = '';
+
+            let displayList = allStations.filter(station => {
+                const matchesKeyword = station.sna.toLowerCase().includes(keyword) || station.ar.toLowerCase().includes(keyword);
+                if (currentTab === 'fav') {
+                    return matchesKeyword && favorites.includes(station.sno);
+                }
+                return matchesKeyword;
+            });
+
+            if (displayList.length === 0) {
+                listContainer.innerHTML = `<div style="text-align:center; color:#888; padding:30px;">沒有找到符合的站點資料</div>`;
+                return;
+            }
+
+            displayList.forEach(station => {
+                const isFav = favorites.includes(station.sno);
+                const card = document.createElement('div');
+                card.className = 'station-card';
+                card.innerHTML = `
+                    <div class="station-title">
+                        <span>${station.sna}</span>
+                        <span>${isFav ? '❤️' : '🤍'}</span>
+                    </div>
+                    <div class="station-address">${station.ar}</div>
+                    <div class="station-info">
+                        <div>可借車輛: <span class="badge-bikes">${station.sbi}</span></div>
+                        <div>可還空位: <span class="badge-empty">${station.bemp}</span></div>
+                    </div>
+                `;
+                
+                // 點擊側邊欄卡片時，地圖自動移動並開啟該 Marker 的 Popup
+                card.addEventListener('click', () => {
+                    map.setView([station.lat, station.lng], 17);
+                    markersLayer.eachLayer(layer => {
+                        if (layer.options.stationId === station.sno) {
+                            layer.openPopup();
+                        }
+                    });
+                });
+
+                listContainer.appendChild(card);
+            });
+
+            document.getElementById('favCount').textContent = favorites.length;
+        }
+
+        // 需求 3：將每筆資料以 Marker 標示在地圖上，點擊後以 Popup 顯示重點資訊
+        function updateMarkers() {
+            markersLayer.clearLayers();
+            const keyword = document.getElementById('searchInput').value.trim().toLowerCase();
+
+            let displayList = allStations.filter(station => {
+                const matchesKeyword = station.sna.toLowerCase().includes(keyword) || station.ar.toLowerCase().includes(keyword);
+                if (currentTab === 'fav') {
+                    return matchesKeyword && favorites.includes(station.sno);
+                }
+                return matchesKeyword;
+            });
+
+            displayList.forEach(station => {
+                const isFav = favorites.includes(station.sno);
+                
+                // 利用資料中的 lat (緯度) 與 lng (經度) 建立 Marker
+                const marker = L.marker([station.lat, station.lng], { stationId: station.sno });
+
+                // 設定點擊 Marker 後跳出的 Popup 重點資訊與互動按鈕
+                const popupContent = `
+                    <div class="popup-box">
+                        <h3>${station.sna}</h3>
+                        <p>📍 地址：${station.ar}</p>
+                        <p>🚲 可借車輛：<b>${station.sbi}</b> 台</p>
+                        <p>🅿️ 可還空位：<b>${station.bemp}</b> 格</p>
+                        <p style="font-size: 0.75rem; color: #888;">更新時間：${station.mday}</p>
+                        <button class="fav-btn ${isFav ? 'is-fav' : ''}" onclick="toggleFavorite('${station.sno}')">
+                            ${isFav ? '❤️ 從我的最愛移除' : '🤍 加入我的最愛'}
+                        </button>
+                    </div>
+                `;
+
+                marker.bindPopup(popupContent);
+                markersLayer.addLayer(marker);
+            });
+        }
+
+        // LocalStorage 資料儲存與切換功能
+        window.toggleFavorite = function(sno) {
+            const index = favorites.indexOf(sno);
+            if (index > -1) {
+                favorites.splice(index, 1);
+            } else {
+                favorites.push(sno);
+            }
+            
+            // 寫入 LocalStorage 永久保存
+            localStorage.setItem('map_favorites', JSON.stringify(favorites));
+            
+            renderStations();
+            updateMarkers();
+        };
+
+        // 搜尋監聽
+        document.getElementById('searchInput').addEventListener('input', () => {
+            renderStations();
+            updateMarkers();
+        });
+
+        // 畫面初始化
+        window.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            fetchStations();
+        });
+    </script>
+</body>
+</html>
